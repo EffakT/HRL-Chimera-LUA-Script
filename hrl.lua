@@ -4,7 +4,8 @@
 -- Version 1.0
 ------------------------------------------------------------------------------
 -- Settings
-join_death_grace_period = tick_rate()*2 -- 2 seconds in ticks
+join_death_grace_period = tick_rate() * 2 -- 2 seconds in ticks
+live_reporting = 0 -- 1 to report on every lap. fal0se to report when no longer in a game
 
 -- Variables
 clua_version = 2.042
@@ -21,22 +22,30 @@ ping_threshold = 100
 player_died = 0
 map_load_time = 0
 player_is_dead = 0
+should_report = 1
+
+
+player_hash = read_string(0x006B7FBD) -- sometimes this value isn't here D:
 
 ----------------------------------------------------------
 -- Utility Functions
 ----------------------------------------------------------
 
 --- Performs an HTTP POST request.
--- TODO: HOW?
-function http_post(url, data, powershell, method)
-
+function http_post(url, data, method)
+    if method == nil then
+        method = 'POST'
+    end
+    data = string.gsub(data, '"', "\\")
+    os.execute("powershell Invoke-WebRequest '" .. url .. "' -TimeoutSec 5 -Method " .. method .. " -Body '" .. data ..
+                   "'")
 end
 
 --- Sends lap time data to a specified URL.
 -- @param URL The URL to send the lap time data to.
 -- @param json The lap time data in JSON format.
 function SendTime(URL, json)
-    http_post(URL, json, true, "POST")
+    http_post(URL, json, "POST")
 end
 
 --- Checks the current map and game type.
@@ -130,6 +139,12 @@ function onTick()
         return
     end
 
+    if (isPGCR() or map == "ui") then
+        if (live_reporting == 0 and should_report == 1) then
+            bulkSendTimes()
+        end
+    end
+
     if race == 0 then
         return
     end
@@ -177,6 +192,23 @@ function handlePlayerDeath()
     end
 end
 
+function isPGCR()
+    -- idk what this is, but seems related to ui?
+    local game_over_state_address = 0x0087AA10
+
+    local game_over_state = read_byte(game_over_state_address)
+    -- 0 = not game over
+    -- 1 = f1 screen
+    -- 2 = PGCR
+    -- 3 = Players can quit
+
+    -- if ui not visible, bail
+    if (game_over_state ~= 2) then
+        return false
+    end
+    return true
+end
+
 --- Determines whether to skip processing the current lap.
 -- @param current_time The current lap time.
 -- @return True if the lap should be skipped, false otherwise.
@@ -221,24 +253,79 @@ function logTime(best_time)
     local server_ip = read_string(0x006A3F38)
     local server_ip_table = splitString(server_ip, ":")
     local server_port = server_ip_table[2]
-    local player_hash = read_string(0x006B7FBD)
+
+
     local playerName = getPlayerName(player)
     local current_map = map
+
+    local timestamp = os.time(os.date("!*t"))
 
     local json
     if debug == 1 then
         json =
             '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
-                '", "player_time":"' .. best_time .. '", "test":"true"}'
+                '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '", "test":"true"}'
     else
         json =
             '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
-                '", "player_time":"' .. best_time .. '"}'
+                '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '"}'
     end
 
-    -- SendTime("https://haloraceleaderboard.effakt.info/api/newtime", json)
+    if (live_reporting == 1) then
+        -- SendTime("https://haloraceleaderboard.effakt.info/api/newtime", json)
+        return
+    end
+    local json_file = ""
+    if file_exists("json") then
+        json_file = read_file("json")
+    end
+    json_file = json_file .. "\n" .. json
+
+    -- write new line to file, \n json
+    write_file("json", json_file)
+
+    should_report = 1
+end
+
+function bulkSendTimes()
+
+    should_report = 0
+
+    local json_file = read_file("json")
+
+    if (isEmpty(json_file)) then
+        return
+    end
+
+    json_split = splitString(json_file, "\n")
+    local json_to_send = "["
+
+    for k, v in pairs(json_split) do
+        json_to_send = json_to_send .. v
+
+        if (k < tablelength(json_split)) then
+            json_to_send = json_to_send .. ","
+        end
+    end
+
+    json_to_send = json_to_send .. "]"
+
+    -- SendTime("https://haloraceleaderboard.effakt.info/api/bulknewtime", json_to_send)
+    SendTime("http://localhost:3000/api/bulknewtime", json_to_send)
+
+    -- clear the file
+    write_file("json", "")
+
+end
+
+function tablelength(T)
+    local count = 0
+    for _ in pairs(T) do
+        count = count + 1
+    end
+    return count
 end
 
 --- Checks if a string is empty or nil.
@@ -305,6 +392,10 @@ function onCommand(command)
         console_out("player_died:" .. player_died)
         console_out("map_load_time:" .. map_load_time)
         console_out("player_is_dead:" .. player_is_dead)
+        console_out("map:" .. map)
+        console_out("should_report:" .. should_report)
+        console_out("live_reporting:" .. live_reporting)
+        console_out("player_hash:" .. player_hash)
         console_out("----------------------------------------------------------")
         return true
     else
@@ -326,12 +417,10 @@ if file_exists("enabled") then
         enabled = 0
     end
 end
-
 -- Register callback functions
 set_callback("map load", "onMapLoad")
 set_callback("tick", "onTick")
 set_callback("command", "onCommand")
-
 -- MapLoad needs to run instantly incase of scripts loading mid game
 
 onMapLoad()
