@@ -23,8 +23,6 @@ player_died = 0
 map_load_time = 0
 player_is_dead = 0
 should_report = 1
-
-
 player_hash = read_string(0x006B7FBD) -- sometimes this value isn't here D:
 
 ----------------------------------------------------------
@@ -37,8 +35,7 @@ function http_post(url, data, method)
         method = 'POST'
     end
     data = string.gsub(data, '"', "\\")
-    os.execute("powershell Invoke-WebRequest '" .. url .. "' -TimeoutSec 5 -Method " .. method .. " -Body '" .. data ..
-                   "'")
+    io.popen("powershell Invoke-WebRequest '" .. url .. "' -TimeoutSec 5 -Method " .. method .. " -Body '" .. data .."'")
 end
 
 --- Sends lap time data to a specified URL.
@@ -254,7 +251,6 @@ function logTime(best_time)
     local server_ip_table = splitString(server_ip, ":")
     local server_port = server_ip_table[2]
 
-
     local playerName = getPlayerName(player)
     local current_map = map
 
@@ -263,12 +259,12 @@ function logTime(best_time)
     local json
     if debug == 1 then
         json =
-            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_name":"' .. playerName ..
+            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
                 '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '", "test":"true"}'
     else
         json =
-            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_name":"' .. playerName ..
+            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
                 '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '"}'
     end
@@ -404,10 +400,6 @@ function onCommand(command)
     return false
 end
 
-----------------------------------------------------------
--- Callback Registrations
-----------------------------------------------------------
-
 -- Read command setting
 if file_exists("enabled") then
     isEnabled = read_file("enabled") == "1"
@@ -417,10 +409,38 @@ if file_exists("enabled") then
         enabled = 0
     end
 end
+
+function getUUID()
+    if file_exists("uuid") then
+        uuid = read_file("uuid")
+        if (not isEmpty(uuid)) then
+            return uuid
+        end
+    end
+    response = assert(io.popen('wmic csproduct get uuid'))
+    uuid = trim(string.gsub(response:read('*all'), 'UUID', ''))
+    if response then
+        response:close()
+    end
+    write_file("uuid", uuid)
+    return trim(uuid)
+end
+
+function trim(s)
+    return (string.gsub(s, "^%s*(.-)%s*$", "%1"))
+  end
+
+----------------------------------------------------------
+-- Callback Registrations
+----------------------------------------------------------
 -- Register callback functions
 set_callback("map load", "onMapLoad")
 set_callback("tick", "onTick")
 set_callback("command", "onCommand")
 -- MapLoad needs to run instantly incase of scripts loading mid game
 
+
+
+player_uuid = getUUID()
+console_out(player_uuid)
 onMapLoad()
