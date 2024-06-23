@@ -34,8 +34,10 @@ function http_post(url, data, method)
     if method == nil then
         method = 'POST'
     end
-    data = string.gsub(data, '"', "\\")
-    io.popen("powershell Invoke-WebRequest '" .. url .. "' -TimeoutSec 5 -Method " .. method .. " -Body '" .. data .."'")
+    -- need to escape double-quotes
+    data = string.gsub(data, '"', "\\\"")
+    command = "powershell Invoke-WebRequest '" .. url .. "' -TimeoutSec 5 -Method " .. method .. " -Body '" .. data .."'"
+    io.popen(command)
 end
 
 --- Sends lap time data to a specified URL.
@@ -249,6 +251,7 @@ function logTime(best_time)
 
     local server_ip = read_string(0x006A3F38)
     local server_ip_table = splitString(server_ip, ":")
+    local server_ip = server_ip_table[1]
     local server_port = server_ip_table[2]
 
     local playerName = getPlayerName(player)
@@ -259,12 +262,12 @@ function logTime(best_time)
     local json
     if debug == 1 then
         json =
-            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
+            '{"ip":"' .. server_ip .. '", "port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
                 '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '", "test":"true"}'
     else
         json =
-            '{"port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
+            '{"ip":"' .. server_ip .. '", "port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
                 '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
                 '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '"}'
     end
@@ -308,12 +311,11 @@ function bulkSendTimes()
 
     json_to_send = json_to_send .. "]"
 
-    -- SendTime("https://haloraceleaderboard.effakt.info/api/bulknewtime", json_to_send)
-    SendTime("http://localhost:3000/api/bulknewtime", json_to_send)
+    SendTime("https://dev.hrl.effakt.info/api/bulknewtime", json_to_send)
+    -- SendTime("http://localhost:3000/api/bulknewtime", json_to_send)
 
     -- clear the file
     write_file("json", "")
-
 end
 
 function tablelength(T)
@@ -358,6 +360,55 @@ function splitString(inputstr, sep)
     return t
 end
 
+
+function sendDebugTime()
+
+    local server_ip = read_string(0x006A3F38)
+    local server_ip_table = splitString(server_ip, ":")
+    local server_ip = server_ip_table[1]
+    local server_port = server_ip_table[2]
+
+
+    local timestamp = os.time(os.date("!*t"))
+    player_hash = ""
+    player_uuid = "tesing"
+    playerName = "test"
+    current_map = "bloodgulch"
+    mode = 0
+    best_time = "999999"
+
+    local json
+    if debug == 1 then
+        json =
+            '{"ip":"' .. server_ip .. '", "port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
+                '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
+                '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '", "test":"true"}'
+    else
+        json =
+            '{"ip":"' .. server_ip .. '", "port":"' .. server_port .. '", "player_hash": "' .. player_hash .. '", "player_uuid": "'.. player_uuid ..'", "player_name":"' .. playerName ..
+                '", "map_name": "' .. current_map .. '", "map_label": "", "race_type": "' .. mode ..
+                '", "player_time":"' .. best_time .. '", "timestamp":"' .. timestamp .. '"}'
+    end
+
+    if (live_reporting == 1) then
+        -- SendTime("https://haloraceleaderboard.effakt.info/api/newtime", json)
+        return
+    end
+    local json_file = ""
+    if file_exists("json") then
+        json_file = read_file("json")
+    end
+    json_file = json_file .. "\n" .. json
+
+    -- write new line to file, \n json
+    write_file("json", json_file)
+
+    should_report = 1
+
+
+    bulkSendTimes()
+end
+
 function onCommand(command)
 
     local separatorPos = command:find(" ")
@@ -393,6 +444,10 @@ function onCommand(command)
         console_out("live_reporting:" .. live_reporting)
         console_out("player_hash:" .. player_hash)
         console_out("----------------------------------------------------------")
+        return true
+    elseif (command == "hrl_debug_time") then
+        console_out("DebugTime Logged")
+        sendDebugTime()
         return true
     else
         return true
@@ -442,5 +497,4 @@ set_callback("command", "onCommand")
 
 
 player_uuid = getUUID()
-console_out(player_uuid)
 onMapLoad()
